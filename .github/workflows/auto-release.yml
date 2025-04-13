@@ -1,0 +1,65 @@
+name: Auto Tag & Push Docker Image
+
+on:
+  push:
+    branches:
+      - main  # 👈 change this if you want a different branch
+
+jobs:
+  release-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Generate next release tag
+        id: tag
+        run: |
+          # Get latest tag or start fresh
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $latest_tag"
+
+          if [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major=${BASH_REMATCH[1]}
+            minor=${BASH_REMATCH[2]}
+            patch=${BASH_REMATCH[3]}
+            patch=$((patch + 1))
+            new_tag="v$major.$minor.$patch"
+          else
+            new_tag="v1.0.0"
+          fi
+
+          # Check if tag already exists
+          if git ls-remote --tags origin | grep -q "refs/tags/$new_tag$"; then
+            echo "Tag $new_tag already exists on remote. Exiting."
+            exit 1
+          fi
+
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+          git tag "$new_tag"
+          git push origin "$new_tag"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            your-dockerhub-username/your-image-name:latest
+            your-dockerhub-username/your-image-name:${{ steps.tag.outputs.new_tag }}
